@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: estat-rest
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:mapfan}
+    # Matches eStatDownload's own scripts (import_to_postgres.sh etc.), which default
+    # DB_USER to "$(whoami)" rather than a fixed role name that may not exist.
+    username: ${DB_USER:${user.name}}
+    password: ${DB_PASSWORD:}
+    driver-class-name: org.postgresql.Driver
+  jackson:
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    # Root "/" is redirected here (see WebConfig) so Swagger UI is the default page.
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+
+# See eStatDownload's wiki for how these views/columns are produced:
+# https://github.com/mbasa-geolonia/eStatDownload/wiki/Attaching-E%E2%80%90Stat-data-into-MapFan-DB's-oaza_polygon
+estat:
+  # Schema holding the join views (oaza_estat_v1..oaza_estat_v6).
+  schema: ${ESTAT_SCHEMA:estat_poly}
+  # Geometry column carried through from MapFan's town.oaza_polygon.shape.
+  shape-column: ${ESTAT_SHAPE_COLUMN:shape}
+  # SRID of the shape column. If it is not already 4326, it is transformed
+  # on the fly before any spatial predicate or GeoJSON/WKT output.
+  shape-srid: ${ESTAT_SHAPE_SRID:4326}
+  # Safety caps so a careless request can't force a sequential scan of half Japan.
+  max-radius-meters: ${ESTAT_MAX_RADIUS_METERS:50000}
+  max-features: ${ESTAT_MAX_FEATURES:5000}
+  default-limit: ${ESTAT_DEFAULT_LIMIT:1000}
+  cors:
+    allowed-origins: ${ESTAT_CORS_ALLOWED_ORIGINS:*}

@@ -1,0 +1,269 @@
+# estat-rest
+
+A Spring Boot REST service whose purpose is to serve Japan's 2020 Census
+small-area (町丁・字等) **statistical datasets from e-Stat through spatial
+queries** — either a **radius from a point**, or a **GeoJSON
+isochrone/isodistance (drive-time) polygon**.
+
+This is possible because the statistical datasets are linked to a polygon
+geographic dataset (MapFan's `oaza_polygon`) through a SQL view, so a single
+spatial predicate against that view's geometry filters the statistics
+directly. The result of a query — GeoJSON or CSV — is meant to feed either a
+**thematic map** (choropleth, catchment-area visualization, etc.) or a
+**statistical report** (aggregate tables, exports for analysis).
+
+The data pipeline and the SQL views that make the linkage possible are built
+by [eStatDownload](https://github.com/mbasa-geolonia/eStatDownload), not by
+this service:
+
+- Data pipeline (download e-Stat tables, import into PostgreSQL): the repo itself.
+- View creation (join e-Stat tables to MapFan's `oaza_polygon` by `key_code`):
+  [the wiki page](https://github.com/mbasa-geolonia/eStatDownload/wiki/Attaching-E%E2%80%90Stat-data-into-MapFan-DB's-oaza_polygon).
+
+This service does not create or modify any of that data — it only runs
+spatial queries against the views (`estat_poly.oaza_estat_v1` ..
+`oaza_estat_v6`) that eStatDownload's SQL scripts already created.
+
+## How it works
+
+- **No hard-coded statistic columns.** The e-Stat CSV import builds each
+  table's columns dynamically from its Japanese header row (see
+  `import_to_postgres.sh` in eStatDownload), so there's no fixed set of
+  column names to bind to a Java entity. Instead, `ViewSchemaService`
+  introspects `information_schema.columns` for each view at first use and
+  caches the result — the service automatically adapts to whatever columns
+  actually exist.
+- **No SQL injection surface.** The only identifiers ever interpolated into
+  SQL are the six fixed view names (`EstatDataset` enum) and the columns read
+  back from `information_schema` — never raw request input. All spatial and
+  scalar request parameters are bound via `NamedParameterJdbcTemplate`.
+- **Geometry is computed only when needed.** The `shape` geometry column is
+  always used in the spatial `WHERE` clause, but is only serialized
+  (`ST_AsGeoJSON` / `ST_AsText`) into the response when `includeGeometry=true`
+  (the default) — see [Parameters](#common-query-parameters) below.
+- **Swagger UI is the default page.** Visiting the app's root URL redirects to
+  interactive API docs where every endpoint can be tried directly.
+
+## Prerequisites
+
+- Java 17+
+- Maven 3.9+
+- A PostgreSQL + PostGIS database where eStatDownload's pipeline and view
+  setup have already been run, so that `estat_poly.oaza_estat_v1` ..
+  `oaza_estat_v6` exist and each has a `shape` geometry column and a GiST
+  spatial index on it.
+
+## Running
+
+```bash
+mvn spring-boot:run
+```
+
+or build and run the jar directly:
+
+```bash
+mvn -DskipTests package
+java -jar target/estat-rest-0.1.0.jar
+```
+
+Then open **http://localhost:8080/** — it redirects to Swagger UI
+(`/swagger-ui.html`), where you can browse and try every endpoint. The raw
+OpenAPI document is at `/v3/api-docs`. Health check: `/actuator/health`.
+
+## Configuration
+
+All settings are environment variables with sensible defaults (see
+`src/main/resources/application.yml`).
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `DB_HOST` | `localhost` | PostgreSQL host |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_NAME` | `mapfan` | Database name |
+| `DB_USER` | the OS user running the JVM | PostgreSQL role. Matches eStatDownload's own scripts, which default to `$(whoami)` (peer auth) rather than a fixed role name |
+| `DB_PASSWORD` | *(empty)* | PostgreSQL password |
+| `SERVER_PORT` | `8080` | HTTP port the service listens on |
+| `ESTAT_SCHEMA` | `estat_poly` | Schema holding `oaza_estat_v1..v6` |
+| `ESTAT_SHAPE_COLUMN` | `shape` | Geometry column name on each view |
+| `ESTAT_SHAPE_SRID` | `4326` | SRID the `shape` column is actually stored in. If not `4326`, every query wraps the column in `ST_Transform(shape, 4326)` on the fly. Leave at `4326` if you've already reprojected the column (e.g. via `UPDATE ... SET shape = ST_Transform(shape, 4326)`) |
+| `ESTAT_MAX_RADIUS_METERS` | `50000` | Hard cap on `radiusMeters` — requests above this are rejected with 400 |
+| `ESTAT_MAX_FEATURES` | `5000` | Hard cap on rows any single response may contain, regardless of `limit` |
+| `ESTAT_DEFAULT_LIMIT` | `1000` | Row limit applied when `limit` is not supplied |
+| `ESTAT_CORS_ALLOWED_ORIGINS` | `*` | CORS `Access-Control-Allow-Origin` for `/api/**` |
+
+## Datasets
+
+Each dataset corresponds to one 2020 Census small-area statistical table,
+joined to MapFan's oaza polygon geometry:
+
+| Slug | Short form | View | Source table | Content |
+|---|---|---|---|---|
+| `population` | `v1` | `oaza_estat_v1` | T001081 | Total population (male/female) and total households |
+| `age` | `v2` | `oaza_estat_v2` | T001082 | Population by 5-year age group and broad age category, by sex |
+| `marital-status` | `v3` | `oaza_estat_v3` | T001083 | Population aged 15+ by marital status, 5-year age group, and sex |
+| `household-size` | `v4` | `oaza_estat_v4` | T001084 | Households by household type and household size |
+| `industry` | `v5` | `oaza_estat_v5` | T001085 | Employed population aged 15+ by industry classification and sex |
+| `housing-tenure` | `v6` | `oaza_estat_v6` | T001086 | Households by housing tenure (owned, public rental, private rental, company housing) |
+
+The `{dataset}` path variable in every endpoint below accepts **any** of the
+three forms in a row above (e.g. `population`, `v1`, or `oaza_estat_v1` are
+all equivalent). An unrecognized value returns `404` with the list of valid
+slugs.
+
+The exact statistic columns returned per dataset (e.g. `人口総数`, `男`, `女`,
+`世帯総数` for `population`) are whatever columns exist on that view in your
+database — call `GET /api/v1/estat/datasets` or inspect the view itself to
+see them; they are not hard-coded in this service (see
+[How it works](#how-it-works)).
+
+## Endpoints
+
+### `GET /api/v1/estat/datasets`
+
+Lists the six datasets above. No parameters. Returns JSON:
+
+```json
+[
+  {
+    "id": "population",
+    "view": "oaza_estat_v1",
+    "sourceTable": "T001081",
+    "titleJa": "男女別人口総数及び世帯総数",
+    "description": "Total population (male/female) and total households"
+  },
+  ...
+]
+```
+
+### `GET /api/v1/estat/{dataset}/radius`
+
+Returns every feature within `radiusMeters` of a center point, using
+PostGIS `ST_DWithin` on the geography cast of the geometry (i.e. a true
+great-circle distance in meters, not a planar approximation).
+
+| Parameter | In | Type | Required | Default | Notes |
+|---|---|---|---|---|---|
+| `dataset` | path | string | yes | — | See [Datasets](#datasets) above |
+| `lon` | query | number | yes | — | Center longitude, WGS84 degrees. Must be in `[-180, 180]` |
+| `lat` | query | number | yes | — | Center latitude, WGS84 degrees. Must be in `[-90, 90]` |
+| `radiusMeters` | query | number | yes | — | Search radius in meters. Must be `> 0` and `<= ESTAT_MAX_RADIUS_METERS` (default 50000) |
+| `format` | query | string | no | `geojson` | `geojson` or `csv` — see [Response formats](#response-formats) |
+| `limit` | query | integer | no | `ESTAT_DEFAULT_LIMIT` (1000) | Max rows returned. Must be `> 0`; always clamped to `ESTAT_MAX_FEATURES` (default 5000) even if a higher value is requested |
+| `includeGeometry` | query | boolean | no | `true` | See [includeGeometry](#includegeometry) below |
+
+Example:
+
+```bash
+curl "http://localhost:8080/api/v1/estat/population/radius?lon=139.7671&lat=35.6812&radiusMeters=1000&format=geojson"
+```
+
+### `POST /api/v1/estat/{dataset}/polygon`
+
+Returns every feature intersecting a GeoJSON **isochrone/isodistance
+(drive-time) polygon** — typically produced by a routing engine as "everywhere
+reachable within N minutes/meters of a point" — using PostGIS `ST_Intersects`.
+Any other polygon works too (a hand-drawn area, an administrative boundary,
+etc.), since the endpoint just intersects whatever geometry it's given.
+Intersection, not containment, is used — a feature that merely touches the
+polygon's edge is included, matching how drive-time-area lookups are
+typically expected to behave (e.g. a census tract straddling the boundary of
+the isochrone).
+
+**Request body** (`Content-Type: application/json`): a GeoJSON `Polygon` or
+`MultiPolygon` geometry object, or a GeoJSON `Feature` whose `geometry` is
+one of those types (its `properties` are ignored). The geometry is assumed to
+be in WGS84 (SRID 4326), per the GeoJSON spec.
+
+```json
+{
+  "type": "Polygon",
+  "coordinates": [[[139.75,35.67],[139.78,35.67],[139.78,35.69],[139.75,35.69],[139.75,35.67]]]
+}
+```
+
+Before being sent to PostGIS, the body is validated (via JTS): it must be a
+`Polygon`/`MultiPolygon`, non-empty, and topologically valid (no
+self-intersections or unclosed rings) — otherwise the request is rejected
+with `400` and a specific message, rather than a raw database error.
+
+| Parameter | In | Type | Required | Default | Notes |
+|---|---|---|---|---|---|
+| `dataset` | path | string | yes | — | See [Datasets](#datasets) above |
+| *(body)* | body | GeoJSON | yes | — | `Polygon`, `MultiPolygon`, or a `Feature` wrapping one |
+| `format` | query | string | no | `geojson` | `geojson` or `csv` |
+| `limit` | query | integer | no | `ESTAT_DEFAULT_LIMIT` (1000) | Same rules as the radius endpoint |
+| `includeGeometry` | query | boolean | no | `true` | See [includeGeometry](#includegeometry) below |
+
+Example:
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/estat/population/polygon?format=csv" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"Polygon","coordinates":[[[139.75,35.67],[139.78,35.67],[139.78,35.69],[139.75,35.69],[139.75,35.67]]]}'
+```
+
+## Common query parameters
+
+### `format`
+
+Controls the response representation for both search endpoints:
+
+- `geojson` (default) — a GeoJSON `FeatureCollection`, `Content-Type: application/geo+json`. Each `Feature.properties` holds every non-geometry column from the view; `Feature.geometry` holds the polygon (or `null`, see `includeGeometry`).
+- `csv` — RFC 4180 CSV, UTF-8, `Content-Type: text/csv;charset=UTF-8`, sent with `Content-Disposition: attachment; filename="<dataset>-<mode>.csv"`. The header row lists every non-geometry column, followed by a `geom` column holding the geometry as WKT text (e.g. for QGIS's "Add Delimited Text Layer"), unless `includeGeometry=false`.
+
+### `includeGeometry`
+
+Some consumers only want the statistics and never render a map. Setting
+`includeGeometry=false`:
+
+- Drops the `geom` column from CSV output entirely (not just left blank).
+- Sets `Feature.geometry` to `null` in GeoJSON output (valid per the GeoJSON
+  spec for an "unlocated" feature) — `Feature.properties` is unchanged.
+- Skips computing `ST_AsGeoJSON`/`ST_AsText` in the SQL itself, not just in
+  the response — reducing both database work and payload size.
+
+The spatial `WHERE` clause (`ST_DWithin`/`ST_Intersects`) always runs against
+the real geometry regardless of this flag — it only affects whether the
+geometry is *returned*, not whether it's used to filter.
+
+### `limit`
+
+Every response is capped server-side to protect the database from an
+accidental full-table scan or an enormous payload:
+
+- If you don't pass `limit`, `ESTAT_DEFAULT_LIMIT` (default 1000) is used.
+- If you do pass `limit`, it's honored up to `ESTAT_MAX_FEATURES` (default
+  5000) — a larger value is silently clamped down, not rejected.
+- `limit=0` or negative is rejected with `400`.
+
+## Errors
+
+All errors — invalid parameters, an unknown dataset, an invalid polygon, or a
+database failure — return a JSON body with a matching HTTP status:
+
+```json
+{
+  "timestamp": "2026-08-31T03:41:01.003427Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Unknown dataset 'nope'. Valid datasets: population, age, marital-status, household-size, industry, housing-tenure",
+  "path": "/api/v1/estat/nope/radius"
+}
+```
+
+| Status | When |
+|---|---|
+| 400 | Out-of-range `lon`/`lat`, non-positive or too-large `radiusMeters`, invalid `format`, non-positive `limit`, malformed/invalid/wrong-type GeoJSON polygon |
+| 404 | Unknown `{dataset}` value |
+| 500 | The underlying view is missing (e.g. eStatDownload's view setup hasn't been run), or another database error |
+
+## Project layout
+
+```
+config/    EstatProperties (env-var config), WebConfig (CORS + root redirect), OpenApiConfig
+dataset/   EstatDataset — the 6 dataset slugs/views, fixed literals only
+service/   EstatQueryService (SQL building/execution), ViewSchemaService (column introspection),
+           GeometryValidationService (GeoJSON validation via JTS)
+render/    GeoJsonRenderer, CsvRenderer, OutputFormat
+web/       EstatController, GlobalExceptionHandler, DTOs
+```
