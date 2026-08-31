@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,3 +31,16 @@ jobs:
           name: estat-rest-war
           path: target/estat-rest.war
           if-no-files-found: error
+
+      - name: Compute short SHA
+        id: vars
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: build-${{ github.run_number }}-${{ steps.vars.outputs.short_sha }}
+          name: Build #${{ github.run_number }} (${{ steps.vars.outputs.short_sha }})
+          files: target/estat-rest.war
