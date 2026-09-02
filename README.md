@@ -100,10 +100,10 @@ joined to MapFan's oaza polygon geometry:
 |---|---|---|---|---|
 | `population` | `v1` | `oaza_estat_v1` | T001081 | Total population (male/female) and total households |
 | `age` | `v2` | `oaza_estat_v2` | T001082 | Population by 5-year age group and broad age category, by sex |
-| `marital-status` | `v3` | `oaza_estat_v3` | T001083 | Population aged 15+ by marital status, 5-year age group, and sex |
-| `household-size` | `v4` | `oaza_estat_v4` | T001084 | Households by household type and household size |
-| `industry` | `v5` | `oaza_estat_v5` | T001085 | Employed population aged 15+ by industry classification and sex |
-| `housing-tenure` | `v6` | `oaza_estat_v6` | T001086 | Households by housing tenure (owned, public rental, private rental, company housing) |
+| `household-size` | `v3` | `oaza_estat_v3` | T001083 | General households by household size (number of persons) |
+| `family-type` | `v4` | `oaza_estat_v4` | T001084 | General households by family type (nuclear family, couple-only, couple with children, etc.), and presence of members under 6/18/65+ |
+| `housing-tenure` | `v5` | `oaza_estat_v5` | T001085 | General households in housing, by tenure (owned or privately rented) |
+| `dwelling-type` | `v6` | `oaza_estat_v6` | T001086 | Primary households by type of dwelling (detached house, row house, apartment building by floor count, etc.) |
 
 The `{dataset}` path variable in every endpoint below accepts **any** of the
 three forms in a row above (e.g. `population`, `v1`, or `oaza_estat_v1` are
@@ -246,7 +246,7 @@ database failure — return a JSON body with a matching HTTP status:
   "timestamp": "2026-08-31T03:41:01.003427Z",
   "status": 404,
   "error": "Not Found",
-  "message": "Unknown dataset 'nope'. Valid datasets: population, age, marital-status, household-size, industry, housing-tenure",
+  "message": "Unknown dataset 'nope'. Valid datasets: population, age, household-size, family-type, housing-tenure, dwelling-type",
   "path": "/api/v1/estat/nope/radius"
 }
 ```

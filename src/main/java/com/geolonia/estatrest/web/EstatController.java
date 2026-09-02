@@ -80,7 +80,7 @@ public class EstatController {
     public ResponseEntity<byte[]> searchByRadius(
             @Parameter(description = "Dataset slug, short view code, or full view name",
                     example = "population", schema = @Schema(allowableValues = {
-                    "population", "age", "marital-status", "household-size", "industry", "housing-tenure"}))
+                    "population", "age", "household-size", "family-type", "housing-tenure", "dwelling-type"}))
             @PathVariable String dataset,
             @Parameter(description = "Center longitude (WGS84)", example = "139.7671")
             @RequestParam double lon,
@@ -125,7 +125,7 @@ public class EstatController {
     public ResponseEntity<byte[]> searchByPolygon(
             @Parameter(description = "Dataset slug, short view code, or full view name",
                     example = "population", schema = @Schema(allowableValues = {
-                    "population", "age", "marital-status", "household-size", "industry", "housing-tenure"}))
+                    "population", "age", "household-size", "family-type", "housing-tenure", "dwelling-type"}))
             @PathVariable String dataset,
             @org.springframework.web.bind.annotation.RequestBody JsonNode body,
             @Parameter(description = "Response format", schema = @Schema(allowableValues = {"geojson", "csv"}))

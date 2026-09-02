@@ -25,18 +25,19 @@ public enum EstatDataset {
     AGE("age", "oaza_estat_v2", "T001082",
             "年齢（5歳階級、4区分）別、男女別人口",
             "Population by 5-year age group and broad age category, by sex"),
-    MARITAL_STATUS("marital-status", "oaza_estat_v3", "T001083",
-            "配偶関係、年齢（5歳階級）、男女別15歳以上人口",
-            "Population aged 15+ by marital status, 5-year age group, and sex"),
-    HOUSEHOLD_SIZE("household-size", "oaza_estat_v4", "T001084",
-            "世帯の種類・世帯人員別世帯数",
-            "Households by household type and household size"),
-    INDUSTRY("industry", "oaza_estat_v5", "T001085",
-            "産業（大分類）、男女別15歳以上就業者数",
-            "Employed population aged 15+ by industry classification and sex"),
-    HOUSING_TENURE("housing-tenure", "oaza_estat_v6", "T001086",
+    HOUSEHOLD_SIZE("household-size", "oaza_estat_v3", "T001083",
+            "世帯人員別一般世帯数",
+            "General households by household size (number of persons)"),
+    FAMILY_TYPE("family-type", "oaza_estat_v4", "T001084",
+            "世帯の家族類型別一般世帯数",
+            "General households by family type (nuclear family, couple-only, couple with children, etc.), " +
+                    "and presence of members under 6, under 18, or 65+"),
+    HOUSING_TENURE("housing-tenure", "oaza_estat_v5", "T001085",
             "住宅の所有の関係別一般世帯数",
-            "Households by housing tenure (owned, public rental, private rental, company housing)");
+            "General households in housing, by tenure (owned or privately rented)"),
+    DWELLING_TYPE("dwelling-type", "oaza_estat_v6", "T001086",
+            "住宅の建て方別主世帯数",
+            "Primary households by type of dwelling (detached house, row house, apartment building by floor count, etc.)");
 
     private final String slug;
     private final String viewName;
