@@ -87,8 +87,9 @@
     </dependencies>
 
     <build>
-        <!-- Drop the version from the built artifact name: target/estat-rest.war, not estat-rest-0.1.0.war -->
-        <finalName>${project.artifactId}</finalName>
+        <!-- target/estatRest.war, so an external Tomcat serves it at /estatRest — the same
+             context path as server.servlet.context-path in application.yml -->
+        <finalName>estatRest</finalName>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

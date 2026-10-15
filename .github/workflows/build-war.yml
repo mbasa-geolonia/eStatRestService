@@ -29,7 +29,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: estat-rest-war
-          path: target/estat-rest.war
+          path: target/estatRest.war
           if-no-files-found: error
 
       - name: Compute short SHA
@@ -43,4 +43,4 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}-${{ steps.vars.outputs.short_sha }}
           name: Build #${{ github.run_number }} (${{ steps.vars.outputs.short_sha }})
-          files: target/estat-rest.war
+          files: target/estatRest.war

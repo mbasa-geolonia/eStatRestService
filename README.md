@@ -59,16 +59,20 @@ spatial queries against the views (`estat_poly.oaza_estat_v1` ..
 mvn spring-boot:run
 ```
 
-or build and run the jar directly:
+or build and run the WAR directly:
 
 ```bash
 mvn -DskipTests package
-java -jar target/estat-rest-0.1.0.jar
+java -jar target/estatRest.war
 ```
 
-Then open **http://localhost:8080/** — it redirects to Swagger UI
-(`/swagger-ui.html`), where you can browse and try every endpoint. The raw
-OpenAPI document is at `/v3/api-docs`. Health check: `/actuator/health`.
+Then open **http://localhost:8080/estatRest/** — it redirects to Swagger UI
+(`/estatRest/swagger-ui.html`), where you can browse and try every endpoint. The raw
+OpenAPI document is at `/estatRest/v3/api-docs`. Health check: `/estatRest/actuator/health`.
+
+All paths are served under the `/estatRest` context path. When `target/estatRest.war`
+is deployed to an external Tomcat instead, Tomcat derives the same `/estatRest` path
+from the WAR file name.
 
 ## Configuration
 
@@ -79,10 +83,11 @@ All settings are environment variables with sensible defaults (see
 |---|---|---|
 | `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_NAME` | `mapfan` | Database name |
+| `DB_NAME` | `estat` | Database name |
 | `DB_USER` | the OS user running the JVM | PostgreSQL role. Matches eStatDownload's own scripts, which default to `$(whoami)` (peer auth) rather than a fixed role name |
 | `DB_PASSWORD` | *(empty)* | PostgreSQL password |
 | `SERVER_PORT` | `8080` | HTTP port the service listens on |
+| `SERVER_CONTEXT_PATH` | `/estatRest` | Context path every endpoint is served under (embedded server only; an external Tomcat uses the WAR file name) |
 | `ESTAT_SCHEMA` | `estat_poly` | Schema holding `oaza_estat_v1..v6` |
 | `ESTAT_SHAPE_COLUMN` | `shape` | Geometry column name on each view |
 | `ESTAT_SHAPE_SRID` | `4326` | SRID the `shape` column is actually stored in. If not `4326`, every query wraps the column in `ST_Transform(shape, 4326)` on the fly. Leave at `4326` if you've already reprojected the column (e.g. via `UPDATE ... SET shape = ST_Transform(shape, 4326)`) |
@@ -90,6 +95,10 @@ All settings are environment variables with sensible defaults (see
 | `ESTAT_MAX_FEATURES` | `5000` | Hard cap on rows any single response may contain, regardless of `limit` |
 | `ESTAT_DEFAULT_LIMIT` | `1000` | Row limit applied when `limit` is not supplied |
 | `ESTAT_CORS_ALLOWED_ORIGINS` | `*` | CORS `Access-Control-Allow-Origin` for `/api/**` |
+| `MESH4_SCHEMA` | `public` | Schema holding the 500m mesh census table |
+| `MESH4_TABLE` | `mesh4` | 500m mesh census table name |
+| `MESH4_GEOM_COLUMN` | `geom` | Geometry column on the mesh4 table |
+| `MESH4_GEOM_SRID` | `4326` | SRID the mesh4 geometry is stored in (transformed to 4326 on the fly otherwise) |
 
 ## Datasets
 
@@ -154,7 +163,7 @@ great-circle distance in meters, not a planar approximation).
 Example:
 
 ```bash
-curl "http://localhost:8080/api/v1/estat/population/radius?lon=139.7671&lat=35.6812&radiusMeters=1000&format=geojson"
+curl "http://localhost:8080/estatRest/api/v1/estat/population/radius?lon=139.7671&lat=35.6812&radiusMeters=1000&format=geojson"
 ```
 
 ### `POST /api/v1/estat/{dataset}/polygon`
@@ -197,7 +206,51 @@ with `400` and a specific message, rather than a raw database error.
 Example:
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/estat/population/polygon?format=csv" \
+curl -X POST "http://localhost:8080/estatRest/api/v1/estat/population/polygon?format=csv" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"Polygon","coordinates":[[[139.75,35.67],[139.78,35.67],[139.78,35.69],[139.75,35.69],[139.75,35.67]]]}'
+```
+
+### `GET /api/v1/estat/mesh4/radius`
+
+Returns every **500m grid mesh cell** (2020 Census, 4th-level mesh) within
+`radiusMeters` of a center point, from the `mesh4` table (configurable via
+`MESH4_*`, see [Configuration](#configuration)). This is a coarse regular grid,
+not the oaza small-area polygons used by the datasets above.
+
+Unlike the datasets above, the returned properties are a fixed set: `mesh_code`
+followed by the population and household statistics `人口総数`,
+`０〜１４歳人口総数`, `１５歳以上人口総数`, `１５〜６４歳人口総数`,
+`２０歳以上人口総数`, `６５歳以上人口総数`, `７５歳以上人口総数`,
+`外国人人口総数`, `世帯総数`, `一般世帯数`, `１人世帯の一般世帯数` ..
+`７人以上世帯の一般世帯数`, `親族のみの一般世帯数`, `核家族の一般世帯数`,
+`核家族以外の一般世帯数`, `６歳未満世帯員のいる一般世帯数`,
+`６５歳以上世帯員のいる一般世帯数`,
+`世帯主の年齢が２０〜２９歳の１人世帯の一般世帯数`, `高齢単身の一般世帯数`,
+`高齢夫婦のみの一般世帯数`.
+
+Parameters are the same as the dataset radius endpoint, minus `dataset`:
+`lon`, `lat`, `radiusMeters` (required), `format`, `limit`, `includeGeometry`.
+
+Example:
+
+```bash
+curl "http://localhost:8080/estatRest/api/v1/estat/mesh4/radius?lon=139.7671&lat=35.6812&radiusMeters=1000&format=csv"
+```
+
+### `POST /api/v1/estat/mesh4/polygon`
+
+Returns every 500m mesh cell intersecting a GeoJSON isochrone/isodistance
+(drive-time) polygon, using PostGIS `ST_Intersects`. The request body,
+validation and parameters (`format`, `limit`, `includeGeometry`) are the same as
+[`POST /api/v1/estat/{dataset}/polygon`](#post-apiv1estatdatasetpolygon), minus
+`dataset`; the returned properties are the same fixed set as
+`GET /api/v1/estat/mesh4/radius`.
+
+Example:
+
+```bash
+curl -X POST "http://localhost:8080/estatRest/api/v1/estat/mesh4/polygon?format=csv" \
   -H "Content-Type: application/json" \
   -d '{"type":"Polygon","coordinates":[[[139.75,35.67],[139.78,35.67],[139.78,35.69],[139.75,35.69],[139.75,35.67]]]}'
 ```
@@ -247,7 +300,7 @@ database failure — return a JSON body with a matching HTTP status:
   "status": 404,
   "error": "Not Found",
   "message": "Unknown dataset 'nope'. Valid datasets: population, age, household-size, family-type, housing-tenure, dwelling-type",
-  "path": "/api/v1/estat/nope/radius"
+  "path": "/estatRest/api/v1/estat/nope/radius"
 }
 ```
 
@@ -262,7 +315,8 @@ database failure — return a JSON body with a matching HTTP status:
 ```
 config/    EstatProperties (env-var config), WebConfig (CORS + root redirect), OpenApiConfig
 dataset/   EstatDataset — the 6 dataset slugs/views, fixed literals only
-service/   EstatQueryService (SQL building/execution), ViewSchemaService (column introspection),
+service/   EstatQueryService (SQL building/execution), Mesh4QueryService (500m mesh radius/polygon queries),
+           ViewSchemaService (column introspection),
            GeometryValidationService (GeoJSON validation via JTS)
 render/    GeoJsonRenderer, CsvRenderer, OutputFormat
 web/       EstatController, GlobalExceptionHandler, DTOs

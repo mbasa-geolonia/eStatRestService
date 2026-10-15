@@ -9,6 +9,7 @@ import com.geolonia.estatrest.render.GeoJsonRenderer;
 import com.geolonia.estatrest.render.OutputFormat;
 import com.geolonia.estatrest.service.EstatQueryService;
 import com.geolonia.estatrest.service.GeometryValidationService;
+import com.geolonia.estatrest.service.Mesh4QueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -49,17 +50,20 @@ public class EstatController {
     private static final MediaType CSV = MediaType.valueOf("text/csv;charset=UTF-8");
 
     private final EstatQueryService queryService;
+    private final Mesh4QueryService mesh4QueryService;
     private final GeometryValidationService geometryValidationService;
     private final GeoJsonRenderer geoJsonRenderer;
     private final CsvRenderer csvRenderer;
     private final EstatProperties properties;
 
     public EstatController(EstatQueryService queryService,
+                            Mesh4QueryService mesh4QueryService,
                             GeometryValidationService geometryValidationService,
                             GeoJsonRenderer geoJsonRenderer,
                             CsvRenderer csvRenderer,
                             EstatProperties properties) {
         this.queryService = queryService;
+        this.mesh4QueryService = mesh4QueryService;
         this.geometryValidationService = geometryValidationService;
         this.geoJsonRenderer = geoJsonRenderer;
         this.csvRenderer = csvRenderer;
@@ -105,7 +109,38 @@ public class EstatController {
 
         List<Map<String, Object>> rows =
                 queryService.searchByRadius(ds, lon, lat, radiusMeters, fmt, effectiveLimit, includeGeometry);
-        return render(ds, fmt, rows, ds.slug() + "-radius", includeGeometry);
+        return render(queryService.propertyColumns(ds), fmt, rows, ds.slug() + "-radius", includeGeometry);
+    }
+
+    @Operation(summary = "Search 500m grid mesh (mesh4) census data by radius",
+            description = "Returns every 500m mesh cell of the 2020 Census mesh4 table within radiusMeters of " +
+                    "(lon, lat), using PostGIS ST_DWithin on the geography cast. Properties are the mesh code " +
+                    "plus population/household statistics (人口総数, 世帯総数, age bands, household size, family type, etc.).")
+    @ApiResponse(responseCode = "200", description = "GeoJSON FeatureCollection or CSV, per ?format=")
+    @GetMapping("/mesh4/radius")
+    public ResponseEntity<byte[]> searchMesh4ByRadius(
+            @Parameter(description = "Center longitude (WGS84)", example = "139.7671")
+            @RequestParam double lon,
+            @Parameter(description = "Center latitude (WGS84)", example = "35.6812")
+            @RequestParam double lat,
+            @Parameter(description = "Search radius in meters", example = "1000")
+            @RequestParam double radiusMeters,
+            @Parameter(description = "Response format", schema = @Schema(allowableValues = {"geojson", "csv"}))
+            @RequestParam(defaultValue = "geojson") String format,
+            @Parameter(description = "Max rows to return (server-side capped)")
+            @RequestParam(required = false) Integer limit,
+            @Parameter(description = "Include the mesh cell geometry in the response. Set to false for " +
+                    "statistics-only consumers that don't render a map.")
+            @RequestParam(defaultValue = "true") boolean includeGeometry) {
+
+        OutputFormat fmt = OutputFormat.from(format);
+        validateLonLat(lon, lat);
+        validateRadius(radiusMeters);
+        int effectiveLimit = effectiveLimit(limit);
+
+        List<Map<String, Object>> rows =
+                mesh4QueryService.searchByRadius(lon, lat, radiusMeters, fmt, effectiveLimit, includeGeometry);
+        return render(mesh4QueryService.propertyColumns(), fmt, rows, "mesh4-radius", includeGeometry);
     }
 
     @Operation(summary = "Search a dataset by isochrone/isodistance (drive-time) polygon",
@@ -144,17 +179,50 @@ public class EstatController {
         String polygonGeoJson = geometryValidationService.extractAndValidatePolygon(body);
         List<Map<String, Object>> rows =
                 queryService.searchByPolygon(ds, polygonGeoJson, fmt, effectiveLimit, includeGeometry);
-        return render(ds, fmt, rows, ds.slug() + "-polygon", includeGeometry);
+        return render(queryService.propertyColumns(ds), fmt, rows, ds.slug() + "-polygon", includeGeometry);
     }
 
-    private ResponseEntity<byte[]> render(EstatDataset ds, OutputFormat fmt, List<Map<String, Object>> rows,
-                                           String fileBaseName, boolean includeGeometry) {
+    @Operation(summary = "Search 500m grid mesh (mesh4) census data by isochrone/isodistance (drive-time) polygon",
+            description = "Returns every 500m mesh cell of the 2020 Census mesh4 table intersecting the supplied " +
+                    "GeoJSON Polygon/MultiPolygon (or a Feature wrapping one) — typically an isochrone/isodistance " +
+                    "polygon from a routing engine — using PostGIS ST_Intersects.")
+    @ApiResponse(responseCode = "200", description = "GeoJSON FeatureCollection or CSV, per ?format=")
+    @io.swagger.v3.oas.annotations.parameters.RequestBody(
+            required = true,
+            content = @Content(mediaType = MediaType.APPLICATION_JSON_VALUE,
+                    examples = @ExampleObject(name = "Drive-time polygon", value = """
+                            {
+                              "type": "Polygon",
+                              "coordinates": [[[139.75,35.67],[139.78,35.67],[139.78,35.69],[139.75,35.69],[139.75,35.67]]]
+                            }""")))
+    @PostMapping(path = "/mesh4/polygon", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<byte[]> searchMesh4ByPolygon(
+            @org.springframework.web.bind.annotation.RequestBody JsonNode body,
+            @Parameter(description = "Response format", schema = @Schema(allowableValues = {"geojson", "csv"}))
+            @RequestParam(defaultValue = "geojson") String format,
+            @Parameter(description = "Max rows to return (server-side capped)")
+            @RequestParam(required = false) Integer limit,
+            @Parameter(description = "Include the mesh cell geometry in the response. Set to false for " +
+                    "statistics-only consumers that don't render a map.")
+            @RequestParam(defaultValue = "true") boolean includeGeometry) {
+
+        OutputFormat fmt = OutputFormat.from(format);
+        int effectiveLimit = effectiveLimit(limit);
+
+        String polygonGeoJson = geometryValidationService.extractAndValidatePolygon(body);
+        List<Map<String, Object>> rows =
+                mesh4QueryService.searchByPolygon(polygonGeoJson, fmt, effectiveLimit, includeGeometry);
+        return render(mesh4QueryService.propertyColumns(), fmt, rows, "mesh4-polygon", includeGeometry);
+    }
+
+    private ResponseEntity<byte[]> render(List<String> propertyColumns, OutputFormat fmt,
+                                           List<Map<String, Object>> rows, String fileBaseName, boolean includeGeometry) {
         if (fmt == OutputFormat.GEOJSON) {
             byte[] body = geoJsonRenderer.render(rows);
             return ResponseEntity.ok().contentType(GEO_JSON).body(body);
         }
 
-        List<String> columns = new ArrayList<>(queryService.propertyColumns(ds));
+        List<String> columns = new ArrayList<>(propertyColumns);
         if (includeGeometry) {
             columns.add(EstatQueryService.GEOM_ALIAS);
         }

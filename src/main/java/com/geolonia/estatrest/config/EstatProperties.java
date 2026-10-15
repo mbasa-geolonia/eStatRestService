@@ -25,6 +25,8 @@ public class EstatProperties {
 
     private final Cors cors = new Cors();
 
+    private final Mesh4 mesh4 = new Mesh4();
+
     public String getSchema() {
         return schema;
     }
@@ -77,6 +79,10 @@ public class EstatProperties {
         return cors;
     }
 
+    public Mesh4 getMesh4() {
+        return mesh4;
+    }
+
     public static class Cors {
         private String allowedOrigins = "*";
 
@@ -86,6 +92,46 @@ public class EstatProperties {
 
         public void setAllowedOrigins(String allowedOrigins) {
             this.allowedOrigins = allowedOrigins;
+        }
+    }
+
+    /** Location of the 500m grid mesh (mesh4) census table. */
+    public static class Mesh4 {
+        private String schema = "public";
+        private String table = "mesh4";
+        private String geomColumn = "geom";
+        private int geomSrid = 4326;
+
+        public String getSchema() {
+            return schema;
+        }
+
+        public void setSchema(String schema) {
+            this.schema = schema;
+        }
+
+        public String getTable() {
+            return table;
+        }
+
+        public void setTable(String table) {
+            this.table = table;
+        }
+
+        public String getGeomColumn() {
+            return geomColumn;
+        }
+
+        public void setGeomColumn(String geomColumn) {
+            this.geomColumn = geomColumn;
+        }
+
+        public int getGeomSrid() {
+            return geomSrid;
+        }
+
+        public void setGeomSrid(int geomSrid) {
+            this.geomSrid = geomSrid;
         }
     }
 }

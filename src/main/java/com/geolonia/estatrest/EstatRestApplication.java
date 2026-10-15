@@ -9,7 +9,7 @@ import org.springframework.boot.web.servlet.support.SpringBootServletInitializer
 
 /**
  * Packaged as a WAR (see pom.xml) so it can run either way:
- *  - standalone: {@code java -jar estat-rest.war} (uses main() below, embedded Tomcat)
+ *  - standalone: {@code java -jar estatRest.war} (uses main() below, embedded Tomcat)
  *  - deployed into an external servlet container (e.g. standalone Tomcat's webapps/): the
  *    container discovers this class via SpringBootServletInitializer and calls configure()
  *    instead of main().
